@@ -57,10 +57,11 @@ RULES = [  # (regex, pengganti) - idempoten
     (r'(?<![A-Za-z_])(?:UnityEngine\.)?Input\.GetMouseButton\(', 'AndroidInput.GetMouseButton('),
     (r'(?<![A-Za-z_])(?:UnityEngine\.)?Input\.mouseScrollDelta', 'AndroidInput.mouseScrollDelta'),
     (r'(?<![A-Za-z_])(?:UnityEngine\.)?Input\.GetAxis\("Mouse ScrollWheel"\)', 'AndroidInput.ScrollWheel'),
+    (r'(?<![A-Za-z_])(?:System\.Diagnostics\.)?Process\.Start\(', 'AndroidShim.Start('),
 ]
 SUSPECT = re.compile(r'DllImport|Process\b|ProcessStartInfo|explorer\.exe|etctool|Devil|assimp|'
                      r'System\.Windows|Microsoft\.Win32|OpenFileName|\.exe\b|FileBrowser|'
-                     r'Directory\.GetLogicalDrives|DriveInfo|\\\\')
+                     r'Directory\.GetLogicalDrives|DriveInfo')
 
 def patch(project, native):
     assets = os.path.join(project, "Assets")
@@ -93,6 +94,45 @@ def patch(project, native):
     shutil.copy(os.path.join(HERE, "AndroidPortBuild.cs"), ed)
     libs = os.path.join(assets, "Plugins", "Android", "libs", "arm64-v8a"); os.makedirs(libs, exist_ok=True)
     for so in os.listdir(native): shutil.copy(os.path.join(native, so), libs)
+    snippets(project)
+
+def snippets(project):
+    """Tulis port-snippets.txt: potongan kode yang dibutuhkan untuk menulis pengganti native."""
+    assets = os.path.join(project, "Assets"); out = open("port-snippets.txt", "w", encoding="utf-8")
+    files = []
+    for r, _, fs in os.walk(assets):
+        if "AndroidPort" in r or os.sep + "Editor" in r: continue
+        for f in fs:
+            if f.endswith(".cs"):
+                p = os.path.join(r, f); files.append((p, open(p, encoding="utf-8-sig", errors="replace").read().splitlines()))
+    def rel(p): return os.path.relpath(p, assets)
+    out.write("##### A. Process / etctool (konteks)\n")
+    for p, L in files:
+        if not any("new Process()" in l or "etctool" in l for l in L): continue
+        last = -99
+        for i, l in enumerate(L):
+            if ("new Process()" in l or "etctool" in l) and i > last + 30:
+                out.write(f"--- {rel(p)}:{i+1}\n" + "\n".join(L[max(0, i-6):i+30]) + "\n"); last = i
+    for lib, tag in (("assimp", "B"), ("Devil", "C")):
+        out.write(f"\n##### {tag}. Deklarasi DllImport {lib}\n")
+        for p, L in files:
+            for i, l in enumerate(L):
+                if f'DllImport("{lib}"' in l:
+                    ent = re.search(r'EntryPoint = "([^"]+)"', l)
+                    sig = " ".join(x.strip() for x in L[i+1:i+4]); sig = sig.split(";")[0]
+                    out.write(f"{ent.group(1) if ent else '?'} :: {sig}\n")
+    # pemanggil Devil
+    out.write("\n##### D. Pemanggil Devil (nama kelas DllImport)\n")
+    for p, L in files:
+        if any('DllImport("Devil"' in l for l in L):
+            m = next((re.search(r'class\s+(\S+)', l) for l in L if re.search(r'\bclass\s+\S+', l)), None)
+            if not m: continue
+            cname = m.group(1)
+            for q, M in files:
+                if q == p: continue
+                for i, l in enumerate(M):
+                    if re.search(re.escape(cname) + r'\.il[A-Z]', l): out.write(f"{rel(q)}:{i+1}: {l.strip()[:220]}\n")
+    out.close()
 
 if __name__ == "__main__":
     c = sys.argv[1]
