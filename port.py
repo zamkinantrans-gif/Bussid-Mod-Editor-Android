@@ -58,6 +58,11 @@ RULES = [  # (regex, pengganti) - idempoten
     (r'(?<![A-Za-z_])(?:UnityEngine\.)?Input\.mouseScrollDelta', 'AndroidInput.mouseScrollDelta'),
     (r'(?<![A-Za-z_])(?:UnityEngine\.)?Input\.GetAxis\("Mouse ScrollWheel"\)', 'AndroidInput.ScrollWheel'),
     (r'(?<![A-Za-z_])(?:System\.Diagnostics\.)?Process\.Start\(', 'AndroidShim.Start('),
+    # enum usang yang menjadi error CS0619 di Unity 2021
+    (r'RuntimePlatform\.WindowsWebPlayer\b', '((RuntimePlatform)(-9001))'),
+    (r'RuntimePlatform\.OSXDashboardPlayer\b', '((RuntimePlatform)(-9002))'),
+    # array berukuran negatif literal (umpan obfuscator) -> CS0248
+    (r'new\s+([A-Za-z_][\w\.<>,]*)\[\s*-\s*\d+\s*\]', r'new \1[0]'),
 ]
 SUSPECT = re.compile(r'DllImport|Process\b|ProcessStartInfo|explorer\.exe|etctool|Devil|assimp|'
                      r'System\.Windows|Microsoft\.Win32|OpenFileName|\.exe\b|FileBrowser|'
@@ -122,6 +127,14 @@ def snippets(project):
                     sig = " ".join(x.strip() for x in L[i+1:i+4]); sig = sig.split(";")[0]
                     out.write(f"{ent.group(1) if ent else '?'} :: {sig}\n")
     # pemanggil Devil
+    out.write("\n##### E. Konteks error kompilasi Unity\n")
+    ERR = [("BSITCar.cs",5292),("BSITCar.cs",10351),("MeshSplit.cs",108),("MeshSplit.cs",4611),("FrictionPreset.cs",68),
+           ("AssetLoaderWindow.cs",163),("VehicleCustomAnimations.cs",757),("VehicleCustomAnimations.cs",768),
+           ("EditableMaterials.cs",808),("Model.cs",720),("UIInspector.cs",491),("MapObjectDataPart.cs",323)]
+    for name, ln in ERR:
+        for p, L in files:
+            if os.path.basename(p) == name:
+                out.write(f"--- {name}:{ln}\n" + "\n".join(f"{i+1}: {L[i][:260]}" for i in range(max(0, ln-6), min(len(L), ln+5))) + "\n")
     out.write("\n##### D. Pemanggil Devil (nama kelas DllImport)\n")
     for p, L in files:
         if any('DllImport("Devil"' in l for l in L):
