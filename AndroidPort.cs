@@ -13,6 +13,13 @@ public static class AndroidPaths
     static string Ensure(string p) { try { if (!Directory.Exists(p)) Directory.CreateDirectory(p); } catch { } return p; }
 }
 
+// Pengganti Process.Start (explorer.exe dll.) - tidak melakukan apa pun di Android.
+public static class AndroidShim
+{
+    public static System.Diagnostics.Process Start(string file, string args)
+    { Debug.Log("[AndroidPort] Process.Start diabaikan: " + file); return null; }
+}
+
 // Pengganti etctool.exe: encoder Etc2Comp (libetcwrap.so).
 public static class EtcNative
 {
