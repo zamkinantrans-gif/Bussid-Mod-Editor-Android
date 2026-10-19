@@ -1,68 +1,104 @@
 name: Port BUSSID Mod Editor to Android
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Tag Release yang berisi zip build Windows (bussid-mod-editor-1_7.zip)"
+        required: true
+        default: "source"
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
 
-      # ---------- Persiapan runner (cegah OOM / disk penuh) ----------
       - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL || true
-          df -h /
+        uses: jlumbroso/free-disk-space@main
+        with:
+          android: false
+          large-packages: false
 
-      - name: Add 8G swap
+      # [BARU] Swap 16G: IL2CPP untuk assembly obfuscated yang besar bisa kehabisan RAM (exit 133).
+      - name: Add swap
         run: |
           sudo swapoff -a || true
-          sudo fallocate -l 8G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          sudo rm -f /mnt/swapfile
+          sudo fallocate -l 16G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
           free -h
+          df -h / /mnt
 
-      # ---------- Langkah pipeline milikmu ----------
-      # >>> GANTI blok ini dengan langkah ASLI di workflow-mu untuk menaruh
-      # >>> folder game Windows ke ./game  (download/unzip dari mana pun sumbernya).
-      - name: Get game files
-        run: |
-          echo "TODO: isi dengan langkah asli (hasil akhir: folder ./game)"
-          test -d game
-
-      # >>> GANTI dengan langkah ASLI yang mengunduh AssetRipper ke ./ar
-      - name: Get AssetRipper
-        run: |
-          echo "TODO: isi dengan langkah asli (hasil akhir: folder ./ar)"
-          test -d ar
-
-      - uses: actions/setup-python@v5
+      - name: Restore reconstructed project (cache)
+        id: cache
+        uses: actions/cache/restore@v4
         with:
-          python-version: '3.x'
+          path: project
+          key: project-${{ inputs.release_tag }}-${{ hashFiles('port.py') }}
 
-      - name: Reconstruct Unity project
-        run: python3 port.py reconstruct game ar project
+      - name: Download Windows build from Release
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p src
+          gh release download "${{ inputs.release_tag }}" --pattern '*.zip' --dir src
+          unzip -q src/*.zip -d src/game
 
-      # >>> Jika langkah asli build native memakai argumen/toolchain lain, pakai yang asli.
-      - name: Build native libs (etcwrap)
-        run: bash build_native.sh   # hasilnya harus ada di ./native-out
+      - name: Reconstruct Unity project (AssetRipper)
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ar
+          echo "Asset rilis AssetRipper terbaru:"
+          gh release view --repo AssetRipper/AssetRipper --json tagName,assets -q '.tagName, (.assets[].name)'
+          gh release download --repo AssetRipper/AssetRipper --pattern '*linux_x64*' --dir ar
+          mkdir -p ar/bin
+          for z in ar/*.zip; do [ -e "$z" ] && unzip -q "$z" -d ar/bin; done
+          for t in ar/*.tar.xz; do [ -e "$t" ] && tar -xJf "$t" -C ar/bin; done
+          find ar/bin -maxdepth 2 | head -30
+          python3 port.py reconstruct src/game ar/bin project
 
-      - name: Patch project
+      - name: Save reconstructed project (cache)
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: project
+          key: project-${{ inputs.release_tag }}-${{ hashFiles('port.py') }}
+
+      - name: Build native libs (assimp 4.1.0 + Etc2Comp)
+        run: bash build_native.sh "$PWD/native-out"
+
+      - name: Patch sources and add Android overlay
         run: python3 port.py patch project native-out
 
-      # ---------- Build Unity ----------
-      - name: Cache Library
+      - name: Upload port report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: port-report
+          path: |
+            port-report.txt
+            port-snippets.txt
+          if-no-files-found: ignore
+
+      # [BARU] Cache folder Library (import aset) supaya build berikutnya jauh lebih cepat.
+      # Dipisah dari cache "project" di atas, yang disimpan sebelum Library ada.
+      - name: Cache Unity Library
         uses: actions/cache@v4
         with:
           path: project/Library
-          key: Library-Android-${{ hashFiles('project/ProjectSettings/ProjectVersion.txt') }}-${{ github.run_number }}
+          key: Library-Android-${{ inputs.release_tag }}-${{ hashFiles('port.py', 'AndroidPort.cs', 'AndroidPortBuild.cs') }}
           restore-keys: |
-            Library-Android-${{ hashFiles('project/ProjectSettings/ProjectVersion.txt') }}-
+            Library-Android-${{ inputs.release_tag }}-
             Library-Android-
 
-      - name: Build Android
+      - name: Build APK (Unity 2021.3.8f1, IL2CPP, ARM64)
         uses: game-ci/unity-builder@v4
         env:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
@@ -73,30 +109,26 @@ jobs:
           unityVersion: 2021.3.8f1
           targetPlatform: Android
           androidExportType: androidPackage
-          androidSymbolType: none
           buildMethod: AndroidPortBuild.Build
           buildName: BUSSIDModEditor
-          versioning: Semantic
           allowDirtyBuild: true
-          # Untuk tes tanpa IL2CPP: -stackTraceLogType Full -portBackend mono
+          # [BARU] stack trace lengkap kalau Unity crash.
+          # Untuk tes tanpa IL2CPP ganti jadi: -stackTraceLogType Full -portBackend mono
           customParameters: -stackTraceLogType Full
 
-      # ---------- Hasil ----------
-      - name: Upload APK
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: BUSSIDModEditor-Android
-          path: build/Android
-          if-no-files-found: error
-
-      - name: Upload port report
+      # [BARU] Log Unity ikut diunggah walau build gagal.
+      - name: Upload Unity logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: port-report
+          name: unity-logs
           path: |
-            port-report.txt
-            port-snippets.txt
             project/Logs
+            project/Library/Bee/fail.log
           if-no-files-found: ignore
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BUSSIDModEditor-apk
+          path: build/Android
