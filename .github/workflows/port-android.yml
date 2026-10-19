@@ -70,7 +70,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: port-report
-          path: port-report.txt
+          path: |
+            port-report.txt
+            port-snippets.txt
           if-no-files-found: ignore
 
       - name: Build APK (Unity 2021.3.8f1, IL2CPP, ARM64)
