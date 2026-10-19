@@ -14,7 +14,8 @@ def _post(path, fields):
 
 def reconstruct(game, ar, out):
     exe = next(os.path.join(r, f) for r, _, fs in os.walk(ar) for f in fs
-               if f == "AssetRipper.GUI.Free")
+               if f.startswith("AssetRipper") and "." not in f.replace("AssetRipper.GUI.Free", "")
+               and not f.endswith((".dll", ".pdb", ".json", ".xml")))
     os.chmod(exe, 0o755)
     export = os.path.abspath("ripped"); shutil.rmtree(export, ignore_errors=True)
     proc = subprocess.Popen([exe, "--port", str(PORT), "--launch-browser", "false"])
