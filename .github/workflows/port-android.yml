@@ -1,0 +1,90 @@
+name: Port BUSSID Mod Editor to Android
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Tag Release yang berisi zip build Windows (bussid-mod-editor-1_7.zip)"
+        required: true
+        default: "source"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          android: false
+          large-packages: false
+
+      - name: Restore reconstructed project (cache)
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: project
+          key: project-${{ inputs.release_tag }}-${{ hashFiles('port.py') }}
+
+      - name: Download Windows build from Release
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p src
+          gh release download "${{ inputs.release_tag }}" --pattern '*.zip' --dir src
+          unzip -q src/*.zip -d src/game
+
+      - name: Reconstruct Unity project (AssetRipper)
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ar
+          gh release download --repo AssetRipper/AssetRipper --pattern 'AssetRipper_linux_x64.zip' --dir ar
+          unzip -q ar/AssetRipper_linux_x64.zip -d ar/bin
+          python3 port.py reconstruct src/game ar/bin project
+
+      - name: Save reconstructed project (cache)
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: project
+          key: project-${{ inputs.release_tag }}-${{ hashFiles('port.py') }}
+
+      - name: Build native libs (assimp 4.1.0 + Etc2Comp)
+        run: bash build_native.sh "$PWD/native-out"
+
+      - name: Patch sources and add Android overlay
+        run: python3 port.py patch project native-out
+
+      - name: Upload port report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: port-report
+          path: port-report.txt
+          if-no-files-found: ignore
+
+      - name: Build APK (Unity 2021.3.8f1, IL2CPP, ARM64)
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: project
+          unityVersion: 2021.3.8f1
+          targetPlatform: Android
+          androidExportType: androidPackage
+          buildMethod: AndroidPortBuild.Build
+          buildName: BUSSIDModEditor
+          allowDirtyBuild: true
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BUSSIDModEditor-apk
+          path: build/Android
