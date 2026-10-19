@@ -5,6 +5,18 @@ using System.IO;
 using System.Runtime.InteropServices;
 using UnityEngine;
 
+// Pengganti kelas <PrivateImplementationDetails> milik compiler (dipakai untuk switch string).
+// Hash FNV-1a 32-bit, sama dengan ComputeStringHash bawaan Roslyn.
+internal static class _003CPrivateImplementationDetails_003E
+{
+    internal static uint ComputeStringHash(string s)
+    {
+        uint h = 2166136261u;
+        if (s != null) for (int i = 0; i < s.Length; i++) h = (s[i] ^ h) * 16777619u;
+        return h;
+    }
+}
+
 public static class AndroidPaths
 {
     // Android/data/<package>/files/BUSSID  (taruh .bussidmod dan model di sini)
