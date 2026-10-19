@@ -61,9 +61,16 @@ RULES = [  # (regex, pengganti) - idempoten
     # enum usang yang menjadi error CS0619 di Unity 2021
     (r'RuntimePlatform\.WindowsWebPlayer\b', '((RuntimePlatform)(-9001))'),
     (r'RuntimePlatform\.OSXDashboardPlayer\b', '((RuntimePlatform)(-9002))'),
-    # array berukuran negatif literal (umpan obfuscator) -> CS0248
-    (r'new\s+([A-Za-z_][\w\.<>,]*)\[\s*-\s*\d+\s*\]', r'new \1[0]'),
+    # array berukuran negatif literal (umpan obfuscator) -> CS0248.
+    # Nama tipe hasil obfuscate diawali karakter non-ASCII (U+02C6/U+02C7), jadi pakai \w saja.
+    (r'new\s+([\w\.<>,]+)\[\s*-\s*\d+\s*\]', r'new \1[0]'),
 ]
+
+# Setter hasil decompile: body memakai `value`, padahal parameternya bernama lain -> CS0103.
+#   public void set_X(T a, bool NAMA) { set_Item(a, value); }
+SETTER_VALUE = re.compile(
+    r'(void\s+set_\S+\([^)]*?,\s*\w+\s+)([^\s,()]+)(\)\s*\{\s*set_Item\([^;]*?,\s*)value(\)\s*;)')
+
 SUSPECT = re.compile(r'DllImport|Process\b|ProcessStartInfo|explorer\.exe|etctool|Devil|assimp|'
                      r'System\.Windows|Microsoft\.Win32|OpenFileName|\.exe\b|FileBrowser|'
                      r'Directory\.GetLogicalDrives|DriveInfo')
@@ -79,6 +86,7 @@ def patch(project, native):
             p = os.path.join(r, f)
             s = open(p, encoding="utf-8-sig", errors="replace").read(); o = s
             for rx, rp in RULES: s = re.sub(rx, rp, s)
+            s = SETTER_VALUE.sub(lambda m: m.group(1) + m.group(2) + m.group(3) + m.group(2) + m.group(4), s)
             if s != o: open(p, "w", encoding="utf-8").write(s); changed += 1
             for i, line in enumerate(s.splitlines(), 1):
                 if SUSPECT.search(line): rep.write(f"{os.path.relpath(p, assets)}:{i}: {line.strip()[:200]}\n")
@@ -128,7 +136,7 @@ def snippets(project):
                     out.write(f"{ent.group(1) if ent else '?'} :: {sig}\n")
     # pemanggil Devil
     out.write("\n##### E. Konteks error kompilasi Unity\n")
-    ERR = [("BSITCar.cs",5292),("BSITCar.cs",10351),("MeshSplit.cs",108),("MeshSplit.cs",4611),("FrictionPreset.cs",68),
+    ERR = [("BSITCar.cs",5292),("BSITCar.cs",6664),("BSITCar.cs",10351),("MeshSplit.cs",108),("MeshSplit.cs",4611),("FrictionPreset.cs",68),
            ("AssetLoaderWindow.cs",163),("VehicleCustomAnimations.cs",757),("VehicleCustomAnimations.cs",768),
            ("EditableMaterials.cs",808),("Model.cs",720),("UIInspector.cs",491),("MapObjectDataPart.cs",323)]
     for name, ln in ERR:
