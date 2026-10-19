@@ -21,11 +21,18 @@ def reconstruct(game, ar, out):
     try: print(subprocess.run([exe, "--help"], capture_output=True, text=True, timeout=30).stdout[:2000])
     except Exception as e: print("--help gagal:", e)
     export = os.path.abspath("ripped"); shutil.rmtree(export, ignore_errors=True)
-    proc = subprocess.Popen([exe, "--port", str(PORT), "--launch-browser", "false"])
+    proc = subprocess.Popen([exe, "--headless", "--port", str(PORT)])
     try:
+        import re as _re
         for _ in range(90):  # tunggu server siap
-            try: print(urllib.request.urlopen(f"http://127.0.0.1:{PORT}/", timeout=2).read()[:1500]); break
+            if proc.poll() is not None: sys.exit(f"AssetRipper berhenti dengan kode {proc.returncode}")
+            try:
+                html = urllib.request.urlopen(f"http://127.0.0.1:{PORT}/", timeout=2).read().decode("utf-8", "replace")
+                print("Server siap. action/href di halaman utama:",
+                      sorted(set(_re.findall(r'(?:action|href|hx-post|hx-get)="([^"]+)"', html)))[:60])
+                break
             except Exception: time.sleep(1)
+        else: sys.exit("Server AssetRipper tidak naik dalam 90 detik")
         # Endpoint/nama field AssetRipper 1.x; belum diverifikasi, coba dua kapitalisasi.
         for key in ("path", "Path"):
             try: _post("/LoadFolder", {key: os.path.abspath(game)}); break
