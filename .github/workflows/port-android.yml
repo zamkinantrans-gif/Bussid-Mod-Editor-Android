@@ -10,7 +10,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
@@ -43,8 +43,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p ar
-          gh release download --repo AssetRipper/AssetRipper --pattern 'AssetRipper_linux_x64.zip' --dir ar
-          unzip -q ar/AssetRipper_linux_x64.zip -d ar/bin
+          echo "Asset rilis AssetRipper terbaru:"
+          gh release view --repo AssetRipper/AssetRipper --json tagName,assets -q '.tagName, (.assets[].name)'
+          gh release download --repo AssetRipper/AssetRipper --pattern '*linux*x64*.zip' --dir ar
+          for z in ar/*.zip; do unzip -q "$z" -d ar/bin; done
           python3 port.py reconstruct src/game ar/bin project
 
       - name: Save reconstructed project (cache)
