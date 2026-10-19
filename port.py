@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pembantu port BUSSID Mod Editor -> Android.
-  reconstruct <game_dir> <assetripper_dir> <out_project>
-  patch       <project> <native_out>
+reconstruct <game_dir> <assetripper_dir> <out_project>
+patch <project> <native_out>
 """
 import os, re, shutil, subprocess, sys, time, urllib.parse, urllib.request, urllib.error
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -47,27 +47,31 @@ def reconstruct(game, ar, out):
     shutil.rmtree(out, ignore_errors=True); shutil.move(root, out)
     print("Project:", out, open(os.path.join(out, "ProjectSettings/ProjectVersion.txt")).read())
 
+# Catatan: kelas pengganti input bernama PortInput (BUKAN AndroidInput, karena bentrok
+# dengan UnityEngine.AndroidInput bawaan Unity -> error CS0117).
 RULES = [  # (regex, pengganti) - idempoten
-    (r'(?<![A-Za-z_])(?:UnityEngine\.)?Application\.dataPath\s*\+\s*"/\.\./', 'AndroidPaths.Root + "/'),
-    (r'(?<![A-Za-z_])(?:UnityEngine\.)?Input\.GetKeyDown\(', 'AndroidInput.GetKeyDown('),
-    (r'(?<![A-Za-z_])(?:UnityEngine\.)?Input\.GetKeyUp\(', 'AndroidInput.GetKeyUp('),
-    (r'(?<![A-Za-z_])(?:UnityEngine\.)?Input\.GetKey\(', 'AndroidInput.GetKey('),
-    (r'(?<![A-Za-z_])(?:UnityEngine\.)?Input\.GetMouseButtonDown\(', 'AndroidInput.GetMouseButtonDown('),
-    (r'(?<![A-Za-z_])(?:UnityEngine\.)?Input\.GetMouseButtonUp\(', 'AndroidInput.GetMouseButtonUp('),
-    (r'(?<![A-Za-z_])(?:UnityEngine\.)?Input\.GetMouseButton\(', 'AndroidInput.GetMouseButton('),
-    (r'(?<![A-Za-z_])(?:UnityEngine\.)?Input\.mouseScrollDelta', 'AndroidInput.mouseScrollDelta'),
-    (r'(?<![A-Za-z_])(?:UnityEngine\.)?Input\.GetAxis\("Mouse ScrollWheel"\)', 'AndroidInput.ScrollWheel'),
-    (r'(?<![A-Za-z_])(?:System\.Diagnostics\.)?Process\.Start\(', 'AndroidShim.Start('),
+(r'(?<![A-Za-z_])(?:UnityEngine\.)?Application\.dataPath\s*\+\s*"/\.\./', 'AndroidPaths.Root + "/'),
+(r'(?<![A-Za-z_])(?:UnityEngine\.)?Input\.GetKeyDown\(', 'PortInput.GetKeyDown('),
+(r'(?<![A-Za-z_])(?:UnityEngine\.)?Input\.GetKeyUp\(', 'PortInput.GetKeyUp('),
+(r'(?<![A-Za-z_])(?:UnityEngine\.)?Input\.GetKey\(', 'PortInput.GetKey('),
+(r'(?<![A-Za-z_])(?:UnityEngine\.)?Input\.GetMouseButtonDown\(', 'PortInput.GetMouseButtonDown('),
+(r'(?<![A-Za-z_])(?:UnityEngine\.)?Input\.GetMouseButtonUp\(', 'PortInput.GetMouseButtonUp('),
+(r'(?<![A-Za-z_])(?:UnityEngine\.)?Input\.GetMouseButton\(', 'PortInput.GetMouseButton('),
+(r'(?<![A-Za-z_])(?:UnityEngine\.)?Input\.mouseScrollDelta', 'PortInput.mouseScrollDelta'),
+(r'(?<![A-Za-z_])(?:UnityEngine\.)?Input\.GetAxis\("Mouse ScrollWheel"\)', 'PortInput.ScrollWheel'),
+# bersihkan sisa patch lama yang memakai nama AndroidInput
+(r'(?<![A-Za-z_.])AndroidInput\.(GetKeyDown|GetKeyUp|GetKey|GetMouseButtonDown|GetMouseButtonUp|GetMouseButton|mouseScrollDelta|ScrollWheel)\b', r'PortInput.\1'),
+(r'(?<![A-Za-z_])(?:System\.Diagnostics\.)?Process\.Start\(', 'AndroidShim.Start('),
     # enum usang yang menjadi error CS0619 di Unity 2021
-    (r'RuntimePlatform\.WindowsWebPlayer\b', '((RuntimePlatform)(-9001))'),
-    (r'RuntimePlatform\.OSXDashboardPlayer\b', '((RuntimePlatform)(-9002))'),
+(r'RuntimePlatform\.WindowsWebPlayer\b', '((RuntimePlatform)(-9001))'),
+(r'RuntimePlatform\.OSXDashboardPlayer\b', '((RuntimePlatform)(-9002))'),
     # array berukuran negatif literal (umpan obfuscator) -> CS0248.
     # Nama tipe hasil obfuscate diawali karakter non-ASCII (U+02C6/U+02C7), jadi pakai \w saja.
-    (r'new\s+([\w\.<>,]+)\[\s*-\s*\d+\s*\]', r'new \1[0]'),
+(r'new\s+([\w\.<>,]+)\[\s*-\s*\d+\s*\]', r'new \1[0]'),
 ]
 
 # Setter hasil decompile: body memakai `value`, padahal parameternya bernama lain -> CS0103.
-#   public void set_X(T a, bool NAMA) { set_Item(a, value); }
+# public void set_X(T a, bool NAMA) { set_Item(a, value); }
 SETTER_VALUE = re.compile(
     r'(void\s+set_\S+\([^)]*?,\s*\w+\s+)([^\s,()]+)(\)\s*\{\s*set_Item\([^;]*?,\s*)value(\)\s*;)')
 
@@ -101,7 +105,13 @@ def patch(project, native):
                     m = os.path.join(r, f + ".meta")
                     if os.path.exists(m): os.remove(m)
     # overlay
-    dst = os.path.join(assets, "AndroidPort"); os.makedirs(dst, exist_ok=True)
+    # AndroidPort.cs HARUS satu assembly dengan kode game. Kalau AssetRipper membuat
+    # Assembly-CSharp.asmdef, kode di dalamnya tidak bisa melihat assembly bawaan Unity.
+    asmdef_dir = next((r for r, _, fs in os.walk(assets)
+                       if any(f.lower().endswith(".asmdef") and f.lower().startswith("assembly-csharp") for f in fs)), None)
+    base = asmdef_dir or assets
+    print("Overlay AndroidPort ditaruh di:", os.path.relpath(base, project))
+    dst = os.path.join(base, "AndroidPort"); os.makedirs(dst, exist_ok=True)
     shutil.copy(os.path.join(HERE, "AndroidPort.cs"), dst)
     ed = os.path.join(assets, "Editor"); os.makedirs(ed, exist_ok=True)
     shutil.copy(os.path.join(HERE, "AndroidPortBuild.cs"), ed)
@@ -137,8 +147,8 @@ def snippets(project):
     # pemanggil Devil
     out.write("\n##### E. Konteks error kompilasi Unity\n")
     ERR = [("BSITCar.cs",5292),("BSITCar.cs",6664),("BSITCar.cs",10351),("MeshSplit.cs",108),("MeshSplit.cs",4611),("FrictionPreset.cs",68),
-           ("AssetLoaderWindow.cs",163),("VehicleCustomAnimations.cs",757),("VehicleCustomAnimations.cs",768),
-           ("EditableMaterials.cs",808),("Model.cs",720),("UIInspector.cs",491),("MapObjectDataPart.cs",323)]
+("AssetLoaderWindow.cs",163),("VehicleCustomAnimations.cs",757),("VehicleCustomAnimations.cs",768),
+("EditableMaterials.cs",808),("Model.cs",720),("UIInspector.cs",491),("MapObjectDataPart.cs",323)]
     for name, ln in ERR:
         for p, L in files:
             if os.path.basename(p) == name:
