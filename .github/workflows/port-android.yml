@@ -45,8 +45,11 @@ jobs:
           mkdir -p ar
           echo "Asset rilis AssetRipper terbaru:"
           gh release view --repo AssetRipper/AssetRipper --json tagName,assets -q '.tagName, (.assets[].name)'
-          gh release download --repo AssetRipper/AssetRipper --pattern '*linux*x64*.zip' --dir ar
-          for z in ar/*.zip; do unzip -q "$z" -d ar/bin; done
+          gh release download --repo AssetRipper/AssetRipper --pattern '*linux_x64*' --dir ar
+          mkdir -p ar/bin
+          for z in ar/*.zip; do [ -e "$z" ] && unzip -q "$z" -d ar/bin; done
+          for t in ar/*.tar.xz; do [ -e "$t" ] && tar -xJf "$t" -C ar/bin; done
+          find ar/bin -maxdepth 2 | head -30
           python3 port.py reconstruct src/game ar/bin project
 
       - name: Save reconstructed project (cache)
