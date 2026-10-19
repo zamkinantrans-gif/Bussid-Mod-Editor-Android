@@ -17,19 +17,22 @@ def reconstruct(game, ar, out):
                if f.startswith("AssetRipper") and "." not in f.replace("AssetRipper.GUI.Free", "")
                and not f.endswith((".dll", ".pdb", ".json", ".xml")))
     os.chmod(exe, 0o755)
+    print("Executable:", exe)
+    try: print(subprocess.run([exe, "--help"], capture_output=True, text=True, timeout=30).stdout[:2000])
+    except Exception as e: print("--help gagal:", e)
     export = os.path.abspath("ripped"); shutil.rmtree(export, ignore_errors=True)
     proc = subprocess.Popen([exe, "--port", str(PORT), "--launch-browser", "false"])
     try:
         for _ in range(90):  # tunggu server siap
-            try: urllib.request.urlopen(f"http://127.0.0.1:{PORT}/", timeout=2); break
+            try: print(urllib.request.urlopen(f"http://127.0.0.1:{PORT}/", timeout=2).read()[:1500]); break
             except Exception: time.sleep(1)
         # Endpoint/nama field AssetRipper 1.x; belum diverifikasi, coba dua kapitalisasi.
         for key in ("path", "Path"):
             try: _post("/LoadFolder", {key: os.path.abspath(game)}); break
-            except urllib.error.HTTPError as e: print("LoadFolder", key, e)
+            except urllib.error.HTTPError as e: print("LoadFolder", key, e, e.read()[:500])
         for key in ("path", "Path"):
             try: _post("/Export/UnityProject", {key: export}); break
-            except urllib.error.HTTPError as e: print("Export", key, e)
+            except urllib.error.HTTPError as e: print("Export", key, e, e.read()[:500])
     finally:
         proc.terminate()
     root = next((r for r, ds, _ in os.walk(export) if "ProjectSettings" in ds and "Assets" in ds), None)
